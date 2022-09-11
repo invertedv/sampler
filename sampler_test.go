@@ -36,7 +36,7 @@ func TestGenerator_SampleRates(t *testing.T) {
 	conn, e := chutils.NewConnect("127.0.0.1", user, pw, nil)
 	assert.Nil(t, e)
 
-	gen := Generator{
+	gen := &Generator{
 		conn:        conn,
 		baseQuery:   "SELECT fico, purpose FROM mtg.fannieNew WHERE purpose!='U'",
 		stratFields: []string{"purpose"},
@@ -47,6 +47,7 @@ func TestGenerator_SampleRates(t *testing.T) {
 	}
 	e = gen.SampleRates()
 	assert.Nil(t, e)
+	fmt.Println(gen)
 }
 
 func TestGenerator_MakeTable(t *testing.T) {

@@ -13,12 +13,14 @@ import (
 )
 
 type Strat struct {
-	Fields     []string  // field names from which to form strats
-	Keys       [][]any   // each element is a combination of strat values
-	Count      []uint64  // count of rows with Keys from corresponding slice element
-	SampleRate []float64 // sample rates to achieve a stratified sample of a given size
-	sortField  string    // field to sort strats on for printing
-	sortAscend bool
+	Fields      []string  // field names from which to form strats
+	Keys        [][]any   // each element is a combination of strat values
+	Count       []uint64  // count of rows with Keys from corresponding slice element
+	SampleRate  []float64 // sample rates to achieve a stratified sample of a given size
+	expCaptured []int
+	actCaptured []int
+	sortField   string // field to sort strats on for printing
+	sortAscend  bool
 }
 
 func NewStrat(fields ...string) *Strat {
@@ -35,16 +37,16 @@ func NewStrat(fields ...string) *Strat {
 	}
 }
 
-func (str *Strat) addRow(fieldVals chutils.Row) error {
-	if len(fieldVals)-1 != len(str.Fields) {
-		return fmt.Errorf("(*Strat) addRow: field count of %d and return row of %d elements", len(fieldVals)-1, len(str.Fields))
+func (strt *Strat) AddRow(fieldVals chutils.Row) error {
+	if len(fieldVals)-1 != len(strt.Fields) {
+		return fmt.Errorf("(*Strat) AddRow: field count of %d and return row of %d elements", len(fieldVals)-1, len(strt.Fields))
 	}
-	val := make([]any, len(str.Fields))
-	for ind := 0; ind < len(str.Fields); ind++ {
+	val := make([]any, len(strt.Fields))
+	for ind := 0; ind < len(strt.Fields); ind++ {
 		val[ind] = fieldVals[ind]
 	}
-	str.Keys = append(str.Keys, val)
-	str.Count = append(str.Count, fieldVals[len(fieldVals)-1].(uint64))
+	strt.Keys = append(strt.Keys, val)
+	strt.Count = append(strt.Count, fieldVals[len(fieldVals)-1].(uint64))
 	return nil
 }
 
@@ -70,19 +72,19 @@ func writeElement(el interface{}, char string, sdelim string) []byte {
 	}
 }
 
-func (str *Strat) Save(table string, conn *chutils.Connect) error {
+func (strt *Strat) Save(table string, conn *chutils.Connect) error {
 	const sep = ","
 
-	if len(str.Keys) == 0 {
+	if len(strt.Keys) == 0 {
 		return fmt.Errorf("(*Strat)Save: cannot save empty strats")
 	}
 
 	// build TableDef of output table
 	fds := make(map[int]*chutils.FieldDef)
 
-	for ind := 0; ind < len(str.Fields); ind++ {
+	for ind := 0; ind < len(strt.Fields); ind++ {
 		ch := chutils.ChField{}
-		switch str.Keys[0][ind].(type) {
+		switch strt.Keys[0][ind].(type) {
 		case int32:
 			ch.Base, ch.Length = chutils.ChInt, 32
 		case int64:
@@ -92,21 +94,21 @@ func (str *Strat) Save(table string, conn *chutils.Connect) error {
 		default:
 			return fmt.Errorf("unsupported type")
 		}
-		fd := chutils.NewFieldDef(str.Fields[ind], ch, "", nil, nil, 0)
+		fd := chutils.NewFieldDef(strt.Fields[ind], ch, "", nil, nil, 0)
 		fds[ind] = fd
 	}
-	n := len(str.Fields)
+	n := len(strt.Fields)
 
 	fd := chutils.NewFieldDef("count", chutils.ChField{Base: chutils.ChInt, Length: 32}, "", nil, nil, 0)
 	fds[n] = fd
 
-	if len(str.SampleRate) > 0 {
+	if len(strt.SampleRate) > 0 {
 		n++
 		fd = chutils.NewFieldDef("sampleRate", chutils.ChField{Base: chutils.ChFloat, Length: 64}, "", nil, nil, 0)
 		fds[n] = fd
 	}
 
-	td := chutils.NewTableDef(str.Fields[0], chutils.MergeTree, fds)
+	td := chutils.NewTableDef(strt.Fields[0], chutils.MergeTree, fds)
 
 	if e := td.Create(conn, table); e != nil {
 		return e
@@ -114,15 +116,15 @@ func (str *Strat) Save(table string, conn *chutils.Connect) error {
 
 	wtr := s.NewWriter(table, conn)
 
-	for row := 0; row < len(str.Count); row++ {
+	for row := 0; row < len(strt.Count); row++ {
 		line := make([]byte, 0)
 
-		for col := 0; col < len(str.Fields); col++ {
-			line = append(line, writeElement(str.Keys[row][col], sep, wtr.Text())...)
+		for col := 0; col < len(strt.Fields); col++ {
+			line = append(line, writeElement(strt.Keys[row][col], sep, wtr.Text())...)
 		}
-		line = append(line, writeElement(str.Count[row], sep, wtr.Text())...)
-		if len(str.SampleRate) > 0 {
-			line = append(line, writeElement(str.SampleRate[row], sep, wtr.Text())...)
+		line = append(line, writeElement(strt.Count[row], sep, wtr.Text())...)
+		if len(strt.SampleRate) > 0 {
+			line = append(line, writeElement(strt.SampleRate[row], sep, wtr.Text())...)
 		}
 		char := byte(' ')
 		if wtr.EOL() != 0 {
@@ -143,67 +145,65 @@ func (str *Strat) Save(table string, conn *chutils.Connect) error {
 }
 
 // TODO: make a 'remaining' category if have too many categories
-func (str *Strat) String() string {
+func (strt *Strat) String() string {
 	const (
 		spaces  = 4
 		maxShow = 100
 	)
-	if str == nil {
+	if strt == nil {
 		return ""
 	}
-	if len(str.Keys) == 0 {
+	if len(strt.Keys) == 0 {
 		return ""
 	}
-	maxes := make([]int, len(str.Fields))
+	maxes := make([]int, len(strt.Fields))
 	maxCnt := spaces // max width of count field
-	for row := 0; row < len(str.Count); row++ {
-		for col := 0; col < len(str.Fields); col++ {
+	for row := 0; row < len(strt.Count); row++ {
+		for col := 0; col < len(strt.Fields); col++ {
 			if row == 0 {
-				maxes[col] = spaces + len(str.Fields[col])
+				maxes[col] = spaces + len(strt.Fields[col])
 			}
-			keyStr := fmt.Sprintf("%v", str.Keys[row][col])
+			keyStr := fmt.Sprintf("%v", strt.Keys[row][col])
 			maxes[col] = Max(maxes[col], len(keyStr)+spaces)
 		}
-		maxCnt = Max(maxCnt, len(humanize.Comma(int64(str.Count[row]))))
+		maxCnt = Max(maxCnt, len(humanize.Comma(int64(strt.Count[row]))))
 	}
 
-	strg := ""
-	for col := 0; col < len(str.Fields); col++ {
-		strg = fmt.Sprintf("%s%s", strg, padder(str.Fields[col], maxes[col], true))
+	str := ""
+	for col := 0; col < len(strt.Fields); col++ {
+		str = fmt.Sprintf("%s%s", str, padder(strt.Fields[col], maxes[col], true))
 	}
 
-	strg += padder("Count", maxCnt+spaces, true)
+	str += padder("Count", maxCnt+spaces, true)
 
 	var maxCapt int
-	if len(str.SampleRate) > 0 {
-		strg += padder("Sample Rate", 11+spaces, true)
-		strg += "Captured"
-		maxCapt = len(humanize.Comma(int64(str.SampleRate[0] * float64(str.Count[0])))) // this is the biggest value
+	if len(strt.SampleRate) > 0 {
+		str += padder("Sample Rate", 11+spaces, true)
+		str += "Exp Captured"
+		maxCapt = len(humanize.Comma(int64(strt.SampleRate[0] * float64(strt.Count[0])))) // this is the biggest value
 	}
 
-	strg = strg + "\n"
+	str = str + "\n"
 
-	for row := 0; row < Min(maxShow, len(str.Count)); row++ {
-		for col := 0; col < len(str.Fields); col++ {
-			keyStr := fmt.Sprintf("%v", str.Keys[row][col])
-			strg = fmt.Sprintf("%s%s", strg, padder(keyStr, maxes[col], true))
+	for row := 0; row < Min(maxShow, len(strt.Count)); row++ {
+		for col := 0; col < len(strt.Fields); col++ {
+			keyStr := fmt.Sprintf("%v", strt.Keys[row][col])
+			str = fmt.Sprintf("%s%s", str, padder(keyStr, maxes[col], true))
 		}
 		// pre-pend spaces so the RHS lines up
-		strg = fmt.Sprintf("%s%s", strg, padder(padder(humanize.Comma(int64(str.Count[row])), maxCnt, false), maxCnt+spaces, true))
-		if len(str.SampleRate) > 0 {
+		str = fmt.Sprintf("%s%s", str, padder(padder(humanize.Comma(int64(strt.Count[row])), maxCnt, false), maxCnt+spaces, true))
+		if len(strt.SampleRate) > 0 {
 			//pre-pend so RHS lines up
-			strg = fmt.Sprintf("%s%s", strg, padder(padder(fmt.Sprintf("%0.2f%%", 100*str.SampleRate[row]), 6, false), 11+spaces, true))
-			captured := int64(str.SampleRate[row] * float64(str.Count[row]))
-			strg = fmt.Sprintf("%s%s", strg, padder(humanize.Comma(captured), maxCapt, false))
+			str = fmt.Sprintf("%s%s", str, padder(padder(fmt.Sprintf("%0.2f%%", 100*strt.SampleRate[row]), 6, false), 11+spaces, true))
+			//			captured := int64(strt.SampleRate[row] * float64(strt.Count[row]))
+			str = fmt.Sprintf("%s%s", str, padder(humanize.Comma(int64(strt.expCaptured[row])), maxCapt, false))
 		}
-		strg = strg + "\n"
+		str = str + "\n"
 	}
 
-	return strg
+	return str
 
 }
-
-type GenOpt func(gn *Generator)
 
 type Generator struct {
 	conn        *chutils.Connect
@@ -237,8 +237,8 @@ func NewGenerator(baseQuery, outputTable, stratTable string, targetTotal int, co
 	}
 }
 
-func (gn *Generator) reset() {
-	gn.n, gn.strats, gn.captured = 0, nil, 0
+func (gn *Generator) Strats() *Strat {
+	return gn.strats
 }
 
 func (gn *Generator) SetMinCount(mc int) {
@@ -274,7 +274,7 @@ func (gn *Generator) GetStrat(fields ...string) (*Strat, error) {
 	}
 
 	for ind := 0; ind < len(rows); ind++ {
-		if e := strat.addRow(rows[ind]); e != nil {
+		if e := strat.AddRow(rows[ind]); e != nil {
 			return nil, e
 		}
 	}
@@ -291,6 +291,7 @@ func (gn *Generator) SampleRates() error {
 
 	var e error
 	gn.strats, e = gn.GetStrat(gn.stratFields...)
+
 	if e != nil {
 		return e
 	}
@@ -303,6 +304,7 @@ func (gn *Generator) SampleRates() error {
 	gn.n = tot
 
 	gn.strats.SampleRate = make([]float64, len(gn.strats.Count))
+	gn.strats.expCaptured = make([]int, len(gn.strats.Count))
 	iter := true
 
 	target := gn.targetTotal
@@ -327,7 +329,8 @@ func (gn *Generator) SampleRates() error {
 				rate = gn.sampleCap - gn.strats.SampleRate[ind]
 			}
 
-			capturedObs += int(rate * float64(c))
+			gn.strats.expCaptured[ind] = int(rate * float64(c))
+			capturedObs += gn.strats.expCaptured[ind]
 			gn.strats.SampleRate[ind] += rate
 
 			if float64(c) < perStrat {
@@ -352,16 +355,19 @@ func (gn *Generator) SampleRates() error {
 
 func (gn *Generator) MakeTable() error {
 
-	gn.strats.Save(gn.stratTable, gn.conn)
+	if e := gn.strats.Save(gn.stratTable, gn.conn); e != nil {
+		return e
+	}
+
 	qry := fmt.Sprintf("SELECT\n  a.*\nFROM\n  (%s) AS a\nJOIN\n  %s AS b\n ON \n", gn.baseQuery, gn.stratTable)
 	joins := make([]string, 0)
+
 	for _, f := range gn.stratFields {
 		joins = append(joins, fmt.Sprintf("a.%s = b.%s\n", f, f))
 	}
 
 	qry = fmt.Sprintf("%s %s", qry, strings.Join(joins, " AND "))
 	qry = fmt.Sprintf("%s WHERE rand32(1001) / 4294967295.0 < b.sampleRate\n", qry)
-	fmt.Println(qry)
 	rdr := s.NewReader(qry, gn.conn)
 
 	if e := rdr.Init("", chutils.MergeTree); e != nil {
@@ -379,6 +385,24 @@ func (gn *Generator) MakeTable() error {
 	}
 
 	return nil
+}
+
+// TODO: answer depends on whether sampled already
+func (gn *Generator) String() string {
+
+	str := "Settings:\n"
+	str = fmt.Sprintf("%sTarget # Obs:%d\n", str, gn.targetTotal)
+	str = fmt.Sprintf("%sStrats Table:%s\n", str, gn.stratTable)
+	str = fmt.Sprintf("%sSample Table:%s\n", str, gn.outputTable)
+	str = fmt.Sprintf("%sStrat Table:\n", str)
+	str = fmt.Sprintf("%s\n%s", str, gn.strats.String())
+	str = fmt.Sprintf("%s\n\nExpected # Obs: %v", str, humanize.Comma(int64(gn.captured)))
+
+	return str
+}
+
+func (gn *Generator) reset() {
+	gn.n, gn.strats, gn.captured = 0, nil, 0
 }
 
 func padder(s string, padTo int, appendTo bool) string {

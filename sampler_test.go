@@ -8,44 +8,36 @@ import (
 	"testing"
 )
 
-func TestGenerator_GetStrat(t *testing.T) {
+func TestStrat_Make(t *testing.T) {
 	user := os.Getenv("user")
 	pw := os.Getenv("pw")
-	conn, e := chutils.NewConnect("127.0.0.1", user, pw, nil)
+	host := os.Getenv("host")
+	conn, e := chutils.NewConnect(host, user, pw, nil)
 	assert.Nil(t, e)
+	strt := NewStrat("SELECT purpose, state, rate, fpDt FROM mtg.freddie", conn, true)
+	strt.MinCount(10000)
 
-	gen := Generator{
-		conn:        conn,
-		baseQuery:   "SELECT purpose, state FROM mtg.fannieNew",
-		stratFields: []string{"purpose", "state"},
-		outputTable: "",
-		minCount:    10000,
-	}
-
-	strat, e := gen.GetStrat("purpose")
+	e = strt.Make("purpose", "fpDt")
 	assert.Nil(t, e)
-	fmt.Println(strat)
-	e = strat.Save("tmp.test", conn)
-	assert.Nil(t, e)
-
+	fmt.Println(strt)
 }
 
 func TestGenerator_SampleRates(t *testing.T) {
 	user := os.Getenv("user")
 	pw := os.Getenv("pw")
-	conn, e := chutils.NewConnect("127.0.0.1", user, pw, nil)
+	host := os.Getenv("host")
+	conn, e := chutils.NewConnect(host, user, pw, nil)
 	assert.Nil(t, e)
 
 	gen := &Generator{
 		conn:        conn,
-		baseQuery:   "SELECT fico, purpose FROM mtg.fannieNew WHERE purpose!='U'",
-		stratFields: []string{"purpose"},
+		query:       "SELECT fico, purpose FROM mtg.freddie WHERE purpose!='U'",
 		outputTable: "",
-		targetTotal: 20000000,
+		targetTotal: 2000000,
 		sampleCap:   0.5,
 		minCount:    0,
 	}
-	e = gen.SampleRates()
+	e = gen.SampleRates("purpose")
 	assert.Nil(t, e)
 	fmt.Println(gen)
 }
@@ -56,16 +48,17 @@ func TestGenerator_MakeTable(t *testing.T) {
 	host := os.Getenv("host")
 	conn, e := chutils.NewConnect(host, user, pw, nil)
 	assert.Nil(t, e)
-	gen := NewGenerator("SELECT lnId, fico, state, purpose FROM mtg.fannieNew",
+	gen := NewGenerator("SELECT lnId, fico, state, purpose, fpDt FROM mtg.freddie",
 		"tmp.test1",
 		"tmp.test",
 		200000,
-		conn,
-		"fico", "state")
-	gen.SetMinCount(1000)
-	e = gen.SampleRates()
+		true,
+		conn)
+	gen.MinCount(1000)
+	e = gen.SampleRates("purpose", "fpDt")
 	assert.Nil(t, e)
 	e = gen.MakeTable()
 	assert.Nil(t, e)
+	fmt.Println(gen)
 
 }

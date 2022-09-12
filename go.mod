@@ -3,7 +3,7 @@ module github.com/invertedv/sampler
 go 1.19
 
 require (
-	github.com/invertedv/chutils v1.1.11
+	github.com/invertedv/chutils v1.1.12
 	github.com/stretchr/testify v1.7.1
 )
 

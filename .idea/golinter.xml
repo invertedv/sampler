@@ -2,6 +2,42 @@
 <project version="4">
   <component name="GoLinterSettings">
     <option name="customConfigFile" value="$PROJECT_DIR$/../linter.yml" />
+    <option name="enabledLinters">
+      <list>
+        <option value="exportloopref" />
+        <option value="funlen" />
+        <option value="noctx" />
+        <option value="gocritic" />
+        <option value="goconst" />
+        <option value="errcheck" />
+        <option value="dogsled" />
+        <option value="ineffassign" />
+        <option value="unparam" />
+        <option value="nakedret" />
+        <option value="staticcheck" />
+        <option value="dupl" />
+        <option value="govet" />
+        <option value="gomnd" />
+        <option value="misspell" />
+        <option value="typecheck" />
+        <option value="gochecknoinits" />
+        <option value="lll" />
+        <option value="bodyclose" />
+        <option value="nolintlint" />
+        <option value="gosec" />
+        <option value="gofmt" />
+        <option value="unconvert" />
+        <option value="unused" />
+        <option value="stylecheck" />
+        <option value="whitespace" />
+        <option value="depguard" />
+        <option value="goimports" />
+        <option value="goprintffuncname" />
+        <option value="gosimple" />
+        <option value="gocyclo" />
+      </list>
+    </option>
+    <option name="goLinterExe" value="$USER_HOME$/bin/golangci-lint" />
     <option name="linterSelected" value="true" />
   </component>
 </project>

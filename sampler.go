@@ -1,27 +1,31 @@
+// Package sampler produces strats and stratified samples.  The package works with ClickHouse tables.
 package sampler
 
-// TODO: don't let strat on float
 import (
 	"fmt"
+	"strings"
+	"time"
+
+	sf "github.com/invertedv/seafan"
+
 	"github.com/dustin/go-humanize"
 	"github.com/invertedv/chutils"
 	s "github.com/invertedv/chutils/sql"
-	"strings"
-	"time"
 )
 
+// Strat produces stratifications.
 type Strat struct {
 	fields       []string // field names from which to form strats
 	keys         [][]any  // each element is a combination of strat values
 	count        []uint64 // count of rows with Keys from corresponding slice element
-	query        string
-	minCount     int
-	conn         *chutils.Connect
-	sortByCounts bool
+	query        string   // query to pull data for strats
+	minCount     int      // lower bound of counts for a strat to be included
+	sortByCounts bool     // if true, strats are sorted descending by count, o.w. sorted ascending by strat
+	n            uint64
+	conn         *chutils.Connect // DB connection
 }
 
 func NewStrat(query string, conn *chutils.Connect, sortByCounts bool) *Strat {
-
 	return &Strat{
 		query:        query,
 		conn:         conn,
@@ -29,6 +33,7 @@ func NewStrat(query string, conn *chutils.Connect, sortByCounts bool) *Strat {
 	}
 }
 
+// MinCount returns (and optionally sets) the minimum # of obs for a strat to be included
 func (strt *Strat) MinCount(mc int) int {
 	if mc >= 0 {
 		strt.minCount = mc
@@ -37,8 +42,21 @@ func (strt *Strat) MinCount(mc int) int {
 	return strt.minCount
 }
 
+// N returns the total number of observations in the strats.
+// This does not include strats dropped if MinCount > 0.
+func (strt *Strat) N() uint64 {
+	return strt.n
+}
+
+// Fields returns the current set of strat fields
 func (strt *Strat) Fields() []string {
 	return strt.fields
+}
+
+// Table returns the elements of the strat table. The table is stored by row.
+// Each row is a stratum.
+func (strt *Strat) Table() (keys [][]any, counts []uint64) {
+	return strt.keys, strt.count
 }
 
 func (strt *Strat) addRow(fieldVals chutils.Row) error {
@@ -50,12 +68,14 @@ func (strt *Strat) addRow(fieldVals chutils.Row) error {
 		val[ind] = fieldVals[ind]
 	}
 	strt.keys = append(strt.keys, val)
-	strt.count = append(strt.count, fieldVals[len(fieldVals)-1].(uint64))
+	cnt := fieldVals[len(fieldVals)-1].(uint64)
+	strt.count = append(strt.count, cnt)
+	strt.n += cnt
 	return nil
 }
 
+// Make generates the strat table for the list of fields.
 func (strt *Strat) Make(fields ...string) error {
-
 	strt.fields = fields
 	strt.keys = nil
 	strt.count = nil
@@ -94,6 +114,7 @@ func (strt *Strat) Make(fields ...string) error {
 		return e
 	}
 
+	strt.n = 0
 	for ind := 0; ind < len(rows); ind++ {
 		if e := strt.addRow(rows[ind]); e != nil {
 			return e
@@ -101,13 +122,12 @@ func (strt *Strat) Make(fields ...string) error {
 	}
 
 	return nil
-
 }
 
 func format(x any) string {
 	switch val := x.(type) {
 	case time.Time:
-		return fmt.Sprintf("%v", val.Format("2006-01-02"))
+		return val.Format("2006-01-02")
 	default:
 		return fmt.Sprintf("%v", val)
 	}
@@ -154,7 +174,7 @@ func (strt *Strat) String() string {
 		}
 		// pre-pend spaces so the RHS lines up
 		str = fmt.Sprintf("%s%s", str, padder(padder(humanize.Comma(int64(strt.count[row])), maxCnt, false), maxCnt+spaces, true))
-		str = str + "\n"
+		str += "\n"
 	}
 
 	// last maxShow rows
@@ -171,40 +191,51 @@ func (strt *Strat) String() string {
 			}
 			// pre-pend spaces so the RHS lines up
 			str = fmt.Sprintf("%s%s", str, padder(padder(humanize.Comma(int64(strt.count[row])), maxCnt, false), maxCnt+spaces, true))
-			str = str + "\n"
+			str += "\n"
 		}
+	}
 
-	}
 	if len(strt.count) > maxShow*2 {
-		str = fmt.Sprintf("%s    %d rows not shown", str, len(strt.count)-2*maxShow)
+		str = fmt.Sprintf("%s    %d rows not shown\n", str, len(strt.count)-2*maxShow)
 	}
+
+	str = fmt.Sprintf("%s    %d total obs", str, strt.n)
 
 	return str
 }
 
+// Generator is used to produce stratified samples.
 type Generator struct {
-	conn        *chutils.Connect
-	query       string
-	sampleRate  []float64
-	outputTable string
-	stratTable  string
-	targetTotal int
-	minCount    uint64
-	sampleCap   float64
-	n           int
-	strats      *Strat
-	actStrats   *Strat
-	expCaptured int
-	actCaptured int
-	sortByCount bool
-	makeQuery   string
+	// inputs
+	query       string  // query to fetch data to sample
+	sampleTable string  // table to create with sample
+	stratTable  string  // table to create with strats/sampling rates
+	targetTotal int     // total number of obs desired
+	minCount    uint64  // minimum # of obs to include a strat in sample (default: 1)
+	sampleCap   float64 // maximum sample rate for any strat (default: 0)
+	sortByCount bool    // if true, sort strats descending by count
+
+	// calculated fields
+	sampleRate  []float64        // calculated sample rates to achieve a balanced sample
+	strats      *Strat           // strats calculated from query data
+	actStrats   *Strat           // strats calculated from sampled data
+	expCaptured int              // expected size of sampleTable
+	actCaptured int              // actual size of sampleTable
+	makeQuery   string           // query used to create sampleTable
+	conn        *chutils.Connect // connection to DB
 }
 
-func NewGenerator(query, outputTable, stratTable string, targetTotal int, sortByCount bool, conn *chutils.Connect) *Generator {
+// NewGenerator returns a *Generator.
+// query is the CH query to fetch the input data.
+// sampleTable is the output table of the sampled input data.
+// stratTable is the output table of strats & sampling rates of the input data.
+// targetTotal is the target size of sampleTable
+// sortByCount sorts strats by descending count, if true.  If false, the table is sorted by the strat fields.
+func NewGenerator(query, sampleTable, stratTable string, targetTotal int, sortByCount bool, conn *chutils.Connect) *Generator {
 	return &Generator{
 		conn:        conn,
 		query:       query,
-		outputTable: outputTable,
+		sampleTable: sampleTable,
 		stratTable:  stratTable,
 		targetTotal: targetTotal,
 		sortByCount: sortByCount,
@@ -213,14 +244,23 @@ func NewGenerator(query, outputTable, stratTable string, targetTotal int, sortBy
 	}
 }
 
+// MakeQuery returns the query used to create sampleTable.
+func (gn *Generator) MakeQuery() string {
+	return gn.makeQuery
+}
+
+// Strats returns the strats of the input data.
 func (gn *Generator) Strats() *Strat {
 	return gn.strats
 }
 
+// ActStrats returns the strats of sampleTable.
 func (gn *Generator) ActStrats() *Strat {
 	return gn.actStrats
 }
 
+// MinCount returns (and optionally sets) the minimum # of obs for a strat to be sampled.
+// The value is not updated if mc < 0.
 func (gn *Generator) MinCount(mc int) uint64 {
 	if mc <= 0 {
 		return gn.minCount
@@ -230,34 +270,39 @@ func (gn *Generator) MinCount(mc int) uint64 {
 	return gn.minCount
 }
 
-func (gn *Generator) SetSampleCap(cap float64) float64 {
-	if cap == 0.0 {
+// SampleCap returns (and optional sets) the maximum sampling rate for strats.
+// The value is not updated if cap <= 0.0 or cap > 1.0
+func (gn *Generator) SampleCap(sCap float64) float64 {
+	if sCap <= 0.0 || sCap > 1.0 {
 		return gn.sampleCap
 	}
 
-	gn.sampleCap = cap
+	gn.sampleCap = sCap
 	gn.reset()
 
 	return gn.sampleCap
 }
 
-func (gn *Generator) SampleRates(fields ...string) error {
+// SampleRates returns the calculated sample rates. The slice is in the same order as Strats.
+func (gn *Generator) SampleRates() []float64 {
+	return gn.sampleRate
+}
+
+// CalcRates calculates the sampling rate for each strat to achieve a balanced sample with a total size of TargetTotal.
+// fields is the set of fields to stratify on.
+func (gn *Generator) CalcRates(fields ...string) error {
 	const (
 		maxIter = 5
 		tol     = 0.01
 	)
 
-	var e error
 	if fields == nil {
-		return fmt.Errorf("(*Generator) SampleRates: must specify strat fields")
+		return fmt.Errorf("(*Generator) CalcRates: must specify strat fields")
 	}
 	gn.strats = NewStrat(gn.query, gn.conn, gn.sortByCount)
+	gn.strats.MinCount(int(gn.minCount))
 
 	if e := gn.strats.Make(fields...); e != nil {
-		return e
-	}
-
-	if e != nil {
 		return e
 	}
 
@@ -266,16 +311,18 @@ func (gn *Generator) SampleRates(fields ...string) error {
 		tot += int(c)
 	}
 
-	gn.n = tot
-
 	gn.sampleRate = make([]float64, len(gn.strats.count))
 	iter := true
 
-	target := gn.targetTotal
-	free := len(gn.strats.count)
+	target := gn.targetTotal     // target # of obs to capture
+	free := len(gn.strats.count) // number of strata that have data available
 	iterCount := 0
-	capturedObs := 0
+	capturedObs := 0                                // total obs we've captured toward the goal of gn.targetTotal
 	tolerance := int(tol * float64(gn.targetTotal)) // call it good if we've gotten within this many obs of target
+
+	// The approach is to calculate a target sample for each strat based on how many obs we need in total.
+	// If there are enough in each stratum, this will take one try.  If some strata don't have enough obs,
+	// then we increasingly draw for strata that still have data available.
 	for iter {
 		lostObs := 0
 		perStrat := float64(target) / float64(free)
@@ -311,10 +358,10 @@ func (gn *Generator) SampleRates(fields ...string) error {
 	return nil
 }
 
+// MakeTable creates sampleTable and stratTable.
 func (gn *Generator) MakeTable() error {
-
 	if gn.strats == nil {
-		return fmt.Errorf("(*Generator) MakeTable: must run SampleRates first")
+		return fmt.Errorf("(*Generator) MakeTable: must run CalcRates first")
 	}
 
 	if e := gn.Save(); e != nil {
@@ -330,23 +377,24 @@ func (gn *Generator) MakeTable() error {
 
 	qry = fmt.Sprintf("%s %s", qry, strings.Join(joins, " AND "))
 	qry = fmt.Sprintf("%s WHERE rand32(1001) / 4294967295.0 < b.sampleRate\n", qry)
+	gn.makeQuery = qry
 	rdr := s.NewReader(qry, gn.conn)
 
 	if e := rdr.Init("", chutils.MergeTree); e != nil {
 		return e
 	}
 
-	if e := rdr.TableSpec().Create(gn.conn, gn.outputTable); e != nil {
+	if e := rdr.TableSpec().Create(gn.conn, gn.sampleTable); e != nil {
 		return e
 	}
 
-	rdr.Name = gn.outputTable
+	rdr.Name = gn.sampleTable
 
 	if e := rdr.Insert(); e != nil {
 		return e
 	}
 
-	qry = fmt.Sprintf("SELECT * FROM %s", gn.outputTable)
+	qry = fmt.Sprintf("SELECT * FROM %s", gn.sampleTable)
 	gn.actStrats = NewStrat(qry, gn.conn, gn.sortByCount)
 	if e := gn.actStrats.Make(gn.strats.fields...); e != nil {
 		return e
@@ -359,6 +407,7 @@ func (gn *Generator) MakeTable() error {
 	return nil
 }
 
+// Save saves stratTable to the DB.
 func (gn *Generator) Save() error {
 	const sep = ","
 
@@ -433,12 +482,13 @@ func (gn *Generator) Save() error {
 	return nil
 }
 
+// Marginals generates the strats of each field we're stratifying on.
 func (gn *Generator) Marginals() ([]*Strat, string, error) {
 	if gn.actStrats == nil {
 		return nil, "", fmt.Errorf("(*Generator) Marginals: have not build sample table")
 	}
 
-	qry := fmt.Sprintf("SELECT * FROM %s", gn.outputTable)
+	qry := fmt.Sprintf("SELECT * FROM %s", gn.sampleTable)
 	strats := make([]*Strat, 0)
 	str := ""
 
@@ -455,10 +505,47 @@ func (gn *Generator) Marginals() ([]*Strat, string, error) {
 	return strats, str, nil
 }
 
+// Plot plots the count of observations for each strat from sampleTable
+func (gn *Generator) Plot(outFile string, show bool) error {
+	y := make([]float64, len(gn.actStrats.count))
+	x := make([]float64, len(gn.actStrats.count))
+	for ind, f := range gn.actStrats.count {
+		y[ind] = float64(f)
+		x[ind] = float64(ind)
+	}
+
+	tps := gn.targetTotal / len(gn.actStrats.count)
+
+	xy, e := sf.NewXY(x, y)
+	if e != nil {
+		return e
+	}
+
+	title := fmt.Sprintf("Observation Count By Strat<br>Target %d", tps)
+
+	if e := xy.Plot(&sf.PlotDef{
+		Show:     show,
+		Title:    title,
+		XTitle:   "Strata",
+		YTitle:   "Counts",
+		STitle:   "",
+		Legend:   false,
+		Height:   1200,
+		Width:    1600,
+		FileName: outFile,
+	},
+		true); e != nil {
+		return e
+	}
+	return nil
+}
+
 func (gn *Generator) String() string {
 	str := ""
-	str = fmt.Sprintf("%sStrats Table:%s\n", str, gn.stratTable)
-	str = fmt.Sprintf("%sSample Table:%s\n", str, gn.outputTable)
+	str = fmt.Sprintf("%sStrats Table: %s\n", str, gn.stratTable)
+	str = fmt.Sprintf("%sSample Table: %s\n", str, gn.sampleTable)
+	str = fmt.Sprintf("%sMin Count: %s\n", str, humanize.Comma(int64(gn.minCount)))
+	str = fmt.Sprintf("%sSampling Cap: %0.2f\n", str, gn.sampleCap)
 	if gn.strats == nil {
 		return str
 	}
@@ -475,26 +562,26 @@ func (gn *Generator) String() string {
 		str = fmt.Sprintf("%s\n%s", str, marg)
 	}
 
-	str = fmt.Sprintf("%s\nSource Strat Table:\n", str)
+	str = fmt.Sprintf("%s\nInput Table Strats:\n", str)
 	str = fmt.Sprintf("%s\n%s", str, gn.strats.String())
 
 	return str
 }
 
 func (gn *Generator) reset() {
-	gn.n, gn.strats, gn.expCaptured = 0, nil, 0
+	gn.strats, gn.actStrats, gn.sampleRate, gn.expCaptured, gn.actCaptured, gn.makeQuery = nil, nil, nil, 0, 0, ""
 }
 
-func padder(s string, padTo int, appendTo bool) string {
-	upper := padTo - len(s)
+func padder(inStr string, padTo int, appendTo bool) string {
+	upper := padTo - len(inStr)
 	for ind := 0; ind < upper; ind++ {
 		if appendTo {
-			s += " "
+			inStr += " "
 		} else {
-			s = " " + s
+			inStr = " " + inStr
 		}
 	}
-	return s
+	return inStr
 }
 
 func Max(a, b int) int {

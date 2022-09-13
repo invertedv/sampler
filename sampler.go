@@ -1,4 +1,43 @@
 // Package sampler produces strats and stratified samples.  The package works with ClickHouse tables.
+//
+// This package does two things:
+//
+//  1. Produces strats.  That is, it produces a table of row counts for each stratum of an input source. The strata are
+//     defined by the user.
+//  2. Creates an output table from the input source that is balanced along the desired strata.
+//
+// # Sampling Procedure
+//
+// The goal is to generate a sample with an equal number of rows for each stratum.  A sample rate for each stratum is
+// determined to achieve this.  If each stratum has sufficient rows, then we're done.  To the extent some strata have
+// insufficent rows, then the total sample will be short.  Also, the sample won't be exactly balanced.  To achieve
+// balance one would have to do one of these:
+//
+//   - Target a sample per strata that is equal to the size of the smallest stratum;
+//   - Resample strata with insufficient rows
+//
+// Practically, the first is not an option as often there will be a stratum with very few rows. The second is tantamount
+// to up-weighting the small strata.  In that case, these observations may become influential observations.
+//
+// Instead of these, this package adopts the philosophy that an approximate balance goes a long way to reducing the
+// leverage of huge strata which is typical in data. The sampling algorithm used by sampler is:
+//
+// 1. At the start
+//   - desired sample = total sample desired / # of strata
+//   - stratum sample rate = min(desired sample / stratum size, sample rate cap)
+//   - stratum captured sample = stratum sample rate * stratum size
+//   - stratum free observations = stratum size - stratum captured sample
+//
+// 2. Update
+//   - total sample desired = total sample desired - total captured
+//   - if this number is "small" stop.
+//   - stratum desired sample = total sample desired / # of strata with free observations
+//   - stratum sample rate = min(stratum desired sample + stratum previously captured sample / stratum size, sample rate cap)
+//   - stratum captured sample = stratum sample rate * stratum size
+//   - stratum free observations = stratum size - stratum captured sample
+//
+// Step 2 is repeated (iterations capped at 5) until the target sample size is achieved (within tolerance) or
+// no strata have free observations.
 package sampler
 
 import (
@@ -6,6 +45,7 @@ import (
 	"strings"
 	"time"
 
+	grob "github.com/MetalBlueberry/go-plotly/graph_objects"
 	sf "github.com/invertedv/seafan"
 
 	"github.com/dustin/go-humanize"
@@ -133,6 +173,31 @@ func format(x any) string {
 	}
 }
 
+// Plot plots the count of observations for each strat from sampleTable
+func (strt *Strat) Plot(outFile string, show bool) error {
+	x := make([]string, len(strt.count))
+	keys := make([]string, len(strt.fields))
+	for row, f := range strt.keys {
+		for col := 0; col < len(f); col++ {
+			keys[col] = fmt.Sprintf("%v", f[col])
+		}
+		x[row] = strings.Join(keys, ":")
+	}
+	tr := &grob.Bar{X: x, Y: strt.count, Type: grob.TraceTypeBar}
+	fig := &grob.Fig{Data: grob.Traces{tr}}
+	return sf.Plotter(fig, nil, &sf.PlotDef{
+		Show:     show,
+		Title:    "Observation Count By Stratum",
+		XTitle:   "Stratum",
+		YTitle:   "Counts",
+		STitle:   "",
+		Legend:   false,
+		Height:   1200,
+		Width:    1600,
+		FileName: outFile,
+	})
+}
+
 func (strt *Strat) String() string {
 	const (
 		spaces  = 4
@@ -216,13 +281,13 @@ type Generator struct {
 	sortByCount bool    // if true, sort strats descending by count
 
 	// calculated fields
-	sampleRate  []float64        // calculated sample rates to achieve a balanced sample
-	strats      *Strat           // strats calculated from query data
-	actStrats   *Strat           // strats calculated from sampled data
-	expCaptured int              // expected size of sampleTable
-	actCaptured int              // actual size of sampleTable
-	makeQuery   string           // query used to create sampleTable
-	conn        *chutils.Connect // connection to DB
+	sampleRate   []float64        // calculated sample rates to achieve a balanced sample
+	strats       *Strat           // strats calculated from query data
+	sampleStrats *Strat           // strats calculated from sampled data
+	expCaptured  int              // expected size of sampleTable
+	actCaptured  int              // actual size of sampleTable
+	makeQuery    string           // query used to create sampleTable
+	conn         *chutils.Connect // connection to DB
 }
 
 // NewGenerator returns a *Generator.
@@ -254,9 +319,9 @@ func (gn *Generator) Strats() *Strat {
 	return gn.strats
 }
 
-// ActStrats returns the strats of sampleTable.
-func (gn *Generator) ActStrats() *Strat {
-	return gn.actStrats
+// SampleStrats returns the strats of sampleTable.
+func (gn *Generator) SampleStrats() *Strat {
+	return gn.sampleStrats
 }
 
 // MinCount returns (and optionally sets) the minimum # of obs for a strat to be sampled.
@@ -395,13 +460,13 @@ func (gn *Generator) MakeTable() error {
 	}
 
 	qry = fmt.Sprintf("SELECT * FROM %s", gn.sampleTable)
-	gn.actStrats = NewStrat(qry, gn.conn, gn.sortByCount)
-	if e := gn.actStrats.Make(gn.strats.fields...); e != nil {
+	gn.sampleStrats = NewStrat(qry, gn.conn, gn.sortByCount)
+	if e := gn.sampleStrats.Make(gn.strats.fields...); e != nil {
 		return e
 	}
 
-	for ind := 0; ind < len(gn.actStrats.count); ind++ {
-		gn.actCaptured += int(gn.actStrats.count[ind])
+	for ind := 0; ind < len(gn.sampleStrats.count); ind++ {
+		gn.actCaptured += int(gn.sampleStrats.count[ind])
 	}
 
 	return nil
@@ -484,7 +549,7 @@ func (gn *Generator) Save() error {
 
 // Marginals generates the strats of each field we're stratifying on.
 func (gn *Generator) Marginals() ([]*Strat, string, error) {
-	if gn.actStrats == nil {
+	if gn.sampleStrats == nil {
 		return nil, "", fmt.Errorf("(*Generator) Marginals: have not build sample table")
 	}
 
@@ -505,41 +570,6 @@ func (gn *Generator) Marginals() ([]*Strat, string, error) {
 	return strats, str, nil
 }
 
-// Plot plots the count of observations for each strat from sampleTable
-func (gn *Generator) Plot(outFile string, show bool) error {
-	y := make([]float64, len(gn.actStrats.count))
-	x := make([]float64, len(gn.actStrats.count))
-	for ind, f := range gn.actStrats.count {
-		y[ind] = float64(f)
-		x[ind] = float64(ind)
-	}
-
-	tps := gn.targetTotal / len(gn.actStrats.count)
-
-	xy, e := sf.NewXY(x, y)
-	if e != nil {
-		return e
-	}
-
-	title := fmt.Sprintf("Observation Count By Strat<br>Target %d", tps)
-
-	if e := xy.Plot(&sf.PlotDef{
-		Show:     show,
-		Title:    title,
-		XTitle:   "Strata",
-		YTitle:   "Counts",
-		STitle:   "",
-		Legend:   false,
-		Height:   1200,
-		Width:    1600,
-		FileName: outFile,
-	},
-		true); e != nil {
-		return e
-	}
-	return nil
-}
-
 func (gn *Generator) String() string {
 	str := ""
 	str = fmt.Sprintf("%sStrats Table: %s\n", str, gn.stratTable)
@@ -551,9 +581,9 @@ func (gn *Generator) String() string {
 	}
 	str = fmt.Sprintf("%s\nTarget # Obs:%d\n", str, gn.targetTotal)
 	str = fmt.Sprintf("%sExpected # Obs: %v", str, humanize.Comma(int64(gn.expCaptured)))
-	if gn.actStrats != nil {
+	if gn.sampleStrats != nil {
 		str = fmt.Sprintf("%s\nActual # Obs: %v\n\nSample Table Strats\n", str, humanize.Comma(int64(gn.actCaptured)))
-		str = fmt.Sprintf("%s%s", str, gn.actStrats.String())
+		str = fmt.Sprintf("%s%s", str, gn.sampleStrats.String())
 		_, marg, e := gn.Marginals()
 		if e != nil {
 			str += "ERROR"
@@ -569,7 +599,7 @@ func (gn *Generator) String() string {
 }
 
 func (gn *Generator) reset() {
-	gn.strats, gn.actStrats, gn.sampleRate, gn.expCaptured, gn.actCaptured, gn.makeQuery = nil, nil, nil, 0, 0, ""
+	gn.strats, gn.sampleStrats, gn.sampleRate, gn.expCaptured, gn.actCaptured, gn.makeQuery = nil, nil, nil, 0, 0, ""
 }
 
 func padder(inStr string, padTo int, appendTo bool) string {

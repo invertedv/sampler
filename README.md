@@ -12,7 +12,7 @@ defined by the user.
 
 The goal is to generate a sample with an equal number of rows for each stratum.  A sample rate for each stratum is
 determined to achieve this.  If each stratum has sufficient rows, then we're done.  To the extent some strata have
-insufficent rows, then the total sample will be short.  Also, the sample won't be exactly balanced.  To achieve
+insufficient rows, then the total sample will be short.  Also, the sample won't be exactly balanced.  To achieve
 balance one would have to do one of these:
 
 - Target a sample per strata that is equal to the size of the smallest stratum;

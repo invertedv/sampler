@@ -502,7 +502,7 @@ func (gn *Generator) Save() error {
 	}
 	n := len(gn.strats.fields)
 
-	fd := chutils.NewFieldDef("count", chutils.ChField{Base: chutils.ChInt, Length: 32}, "", nil, nil, 0)
+	fd := chutils.NewFieldDef("count", chutils.ChField{Base: chutils.ChInt, Length: 64}, "", nil, nil, 0)
 	fds[n] = fd
 
 	if len(gn.sampleRate) > 0 {

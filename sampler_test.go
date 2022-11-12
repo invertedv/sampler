@@ -50,7 +50,7 @@ func TestGenerator_MakeTable(t *testing.T) {
 	host := os.Getenv("host")
 	conn, e := chutils.NewConnect(host, user, pw, nil)
 	assert.Nil(t, e)
-	gen := NewGenerator("SELECT lnId, fico, state, purpose, servicer, fpDt FROM mtg.freddieNew",
+	gen := NewGenerator("SELECT lnId, fico, state, purpose, servicer, fpDt FROM mtg.freddie",
 		"tmp.test1",
 		"tmp.test",
 		200000,

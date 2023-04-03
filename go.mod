@@ -5,8 +5,8 @@ go 1.19
 require (
 	github.com/MetalBlueberry/go-plotly v0.4.0
 	github.com/dustin/go-humanize v1.0.1
-	github.com/invertedv/chutils v1.1.16
-	github.com/invertedv/seafan v0.2.12
+	github.com/invertedv/chutils v1.1.17
+	github.com/invertedv/seafan v0.2.13
 	github.com/stretchr/testify v1.8.2
 )
 

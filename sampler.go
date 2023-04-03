@@ -424,7 +424,7 @@ func (gn *Generator) CalcRates(fields ...string) error {
 }
 
 // MakeTable creates sampleTable and stratTable.
-func (gn *Generator) MakeTable() error {
+func (gn *Generator) MakeTable(timeOut int64) error {
 	if gn.strats == nil {
 		return fmt.Errorf("(*Generator) MakeTable: must run CalcRates first")
 	}
@@ -454,6 +454,8 @@ func (gn *Generator) MakeTable() error {
 	}
 
 	rdr.Name = gn.sampleTable
+
+	chutils.WithTimeOut(timeOut)(gn.conn)
 
 	if e := rdr.Insert(); e != nil {
 		return e

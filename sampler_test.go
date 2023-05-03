@@ -16,7 +16,7 @@ func TestStrat_Make(t *testing.T) {
 	host := os.Getenv("host")
 	conn, e := chutils.NewConnect(host, user, pw, nil)
 	assert.Nil(t, e)
-	strt := NewStrat("SELECT purpose, state, rate, fpDt FROM mtg.freddie", conn, true)
+	strt := NewStrat("SELECT purpose, state, rate, fpDt FROM mtg.fannie", conn, true)
 	strt.MinCount(10000)
 
 	e = strt.Make("purpose", "fpDt")
@@ -33,7 +33,7 @@ func TestGenerator_SampleRates(t *testing.T) {
 
 	gen := &Generator{
 		conn:        conn,
-		query:       "SELECT fico, purpose FROM mtg.freddie WHERE purpose!='U'",
+		query:       "SELECT fico, purpose FROM mtg.fannie WHERE purpose!='U'",
 		sampleTable: "",
 		targetTotal: 2000000,
 		sampleCap:   0.5,
@@ -50,7 +50,7 @@ func TestGenerator_MakeTable(t *testing.T) {
 	host := os.Getenv("host")
 	conn, e := chutils.NewConnect(host, user, pw, nil)
 	assert.Nil(t, e)
-	gen := NewGenerator("SELECT lnId, fico, state, purpose, servicer, fpDt FROM mtg.freddie",
+	gen := NewGenerator("SELECT lnId, fico, state, purpose, fpDt FROM mtg.fannie",
 		"tmp.test1",
 		"tmp.test",
 		200000,
@@ -59,7 +59,7 @@ func TestGenerator_MakeTable(t *testing.T) {
 	gen.MinCount(10000)
 	e = gen.CalcRates("state", "purpose")
 	assert.Nil(t, e)
-	e = gen.MakeTable()
+	e = gen.MakeTable(60)
 	assert.Nil(t, e)
 	fmt.Println(gen)
 	e = gen.Strats().Plot("", true)

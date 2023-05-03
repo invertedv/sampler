@@ -5,8 +5,8 @@ go 1.19
 require (
 	github.com/MetalBlueberry/go-plotly v0.4.0
 	github.com/dustin/go-humanize v1.0.1
-	github.com/invertedv/chutils v1.1.17
-	github.com/invertedv/seafan v0.2.13
+	github.com/invertedv/chutils v1.1.20
+	github.com/invertedv/seafan v0.2.21
 	github.com/stretchr/testify v1.8.2
 )
 
@@ -25,6 +25,8 @@ require (
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/flatbuffers v1.12.0 // indirect
 	github.com/google/uuid v1.3.0 // indirect
+	github.com/invertedv/keyval v0.0.13 // indirect
+	github.com/invertedv/utilities v0.0.10 // indirect
 	github.com/klauspost/compress v1.15.15 // indirect
 	github.com/leesper/go_rng v0.0.0-20171009123644-5344a9259b21 // indirect
 	github.com/paulmach/orb v0.9.0 // indirect

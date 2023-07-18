@@ -42,12 +42,11 @@ package sampler
 
 import (
 	"fmt"
+	"github.com/invertedv/utilities"
 	"strings"
 	"time"
 
 	grob "github.com/MetalBlueberry/go-plotly/graph_objects"
-	sf "github.com/invertedv/seafan"
-
 	"github.com/dustin/go-humanize"
 	"github.com/invertedv/chutils"
 	s "github.com/invertedv/chutils/sql"
@@ -185,16 +184,17 @@ func (strt *Strat) Plot(outFile string, show bool) error {
 	}
 	tr := &grob.Bar{X: x, Y: strt.count, Type: grob.TraceTypeBar}
 	fig := &grob.Fig{Data: grob.Traces{tr}}
-	return sf.Plotter(fig, nil, &sf.PlotDef{
-		Show:     show,
-		Title:    "Observation Count By Stratum",
-		XTitle:   "Stratum",
-		YTitle:   "Counts",
-		STitle:   "",
-		Legend:   false,
-		Height:   1200,
-		Width:    1600,
-		FileName: outFile,
+	return utilities.Plotter(fig, nil, &utilities.PlotDef{
+		Show:       show,
+		Title:      "Observation Count By Stratum",
+		XTitle:     "Stratum",
+		YTitle:     "Counts",
+		STitle:     "",
+		Legend:     false,
+		Height:     1200,
+		Width:      1600,
+		ImageTypes: []utilities.PlotlyImage{utilities.PlotlyPNG, utilities.PlotlyHTML},
+		FileName:   outFile,
 	})
 }
 

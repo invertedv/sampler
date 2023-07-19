@@ -62,8 +62,8 @@ func TestGenerator_MakeTable(t *testing.T) {
 	e = gen.MakeTable(60)
 	assert.Nil(t, e)
 	fmt.Println(gen)
-	e = gen.Strats().Plot("", true)
+	e = gen.Strats().Plot("", "", nil, true)
 	assert.Nil(t, e)
-	e = gen.SampleStrats().Plot("", true)
+	e = gen.SampleStrats().Plot("", "", nil, true)
 	assert.Nil(t, e)
 }

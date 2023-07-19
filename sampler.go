@@ -173,7 +173,7 @@ func format(x any) string {
 }
 
 // Plot plots the count of observations for each strat from sampleTable
-func (strt *Strat) Plot(outFile string, show bool) error {
+func (strt *Strat) Plot(outDir, outFile string, imageTypes []utilities.PlotlyImage, show bool) error {
 	x := make([]string, len(strt.count))
 	keys := make([]string, len(strt.fields))
 	for row, f := range strt.keys {
@@ -193,7 +193,8 @@ func (strt *Strat) Plot(outFile string, show bool) error {
 		Legend:     false,
 		Height:     1200,
 		Width:      1600,
-		ImageTypes: []utilities.PlotlyImage{utilities.PlotlyPNG, utilities.PlotlyHTML},
+		ImageTypes: imageTypes,
+		OutDir:     outDir,
 		FileName:   outFile,
 	})
 }

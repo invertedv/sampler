@@ -442,7 +442,7 @@ func (gn *Generator) MakeTable(timeOut int64) error {
 	}
 
 	qry = fmt.Sprintf("%s %s", qry, strings.Join(joins, " AND "))
-	qry = fmt.Sprintf("%s WHERE rand32(1001) / 4294967295.0 < b.sampleRate\n", qry)
+	qry = fmt.Sprintf("%s WHERE rand32(rowNumberInAllBlocks()) / 4294967295.0 < b.sampleRate\n", qry)
 	gn.makeQuery = qry
 	rdr := s.NewReader(qry, gn.conn)
 

@@ -33,7 +33,7 @@ func TestGenerator_SampleRates(t *testing.T) {
 
 	gen := &Generator{
 		conn:        conn,
-		query:       "SELECT origFico, purpose FROM bk0.final",
+		Query:       "SELECT origFico, purpose FROM bk0.final",
 		sampleTable: "",
 		targetTotal: 2000000,
 		sampleCap:   0.5,

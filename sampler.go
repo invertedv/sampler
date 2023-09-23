@@ -273,7 +273,7 @@ func (strt *Strat) String() string {
 // Generator is used to produce stratified samples.
 type Generator struct {
 	// inputs
-	query       string  // query to fetch data to sample
+	Query       string  // Query to fetch data to sample
 	sampleTable string  // table to create with sample
 	stratTable  string  // table to create with strats/sampling rates
 	targetTotal int     // total number of obs desired
@@ -283,11 +283,11 @@ type Generator struct {
 
 	// calculated fields
 	sampleRate   []float64        // calculated sample rates to achieve a balanced sample
-	strats       *Strat           // strats calculated from query data
+	strats       *Strat           // strats calculated from Query data
 	sampleStrats *Strat           // strats calculated from sampled data
 	expCaptured  int              // expected size of sampleTable
 	actCaptured  int              // actual size of sampleTable
-	makeQuery    string           // query used to create sampleTable
+	makeQuery    string           // Query used to create sampleTable
 	conn         *chutils.Connect // connection to DB
 }
 
@@ -300,7 +300,7 @@ type Generator struct {
 func NewGenerator(query, sampleTable, stratTable string, targetTotal int, sortByCount bool, conn *chutils.Connect) *Generator {
 	return &Generator{
 		conn:        conn,
-		query:       query,
+		Query:       query,
 		sampleTable: sampleTable,
 		stratTable:  stratTable,
 		targetTotal: targetTotal,
@@ -365,7 +365,7 @@ func (gn *Generator) CalcRates(fields ...string) error {
 	if fields == nil {
 		return fmt.Errorf("(*Generator) CalcRates: must specify strat fields")
 	}
-	gn.strats = NewStrat(gn.query, gn.conn, gn.sortByCount)
+	gn.strats = NewStrat(gn.Query, gn.conn, gn.sortByCount)
 	gn.strats.MinCount(int(gn.minCount))
 
 	if e := gn.strats.Make(fields...); e != nil {
@@ -434,7 +434,7 @@ func (gn *Generator) MakeTable(timeOut int64) error {
 		return e
 	}
 
-	qry := fmt.Sprintf("SELECT\n  a.*\nFROM\n  (%s) AS a\nJOIN\n  %s AS b\n ON \n", gn.query, gn.stratTable)
+	qry := fmt.Sprintf("SELECT\n  a.*\nFROM\n  (%s) AS a\nJOIN\n  %s AS b\n ON \n", gn.Query, gn.stratTable)
 	joins := make([]string, 0)
 
 	for _, f := range gn.strats.fields {

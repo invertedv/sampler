@@ -57,7 +57,7 @@ type Strat struct {
 	fields       []string // field names from which to form strats
 	keys         [][]any  // each element is a combination of strat values
 	count        []uint64 // count of rows with Keys from corresponding slice element
-	query        string   // query to pull data for strats
+	Query        string   // Query to pull data for strats
 	minCount     int      // lower bound of counts for a strat to be included
 	sortByCounts bool     // if true, strats are sorted descending by count, o.w. sorted ascending by strat
 	n            uint64
@@ -66,7 +66,7 @@ type Strat struct {
 
 func NewStrat(query string, conn *chutils.Connect, sortByCounts bool) *Strat {
 	return &Strat{
-		query:        query,
+		Query:        query,
 		conn:         conn,
 		sortByCounts: sortByCounts,
 	}
@@ -120,7 +120,7 @@ func (strt *Strat) Make(fields ...string) error {
 	strt.count = nil
 
 	fieldsList := strings.Join(fields, ",")
-	qry := fmt.Sprintf("SELECT %s, count(*) AS n FROM (%s) GROUP BY %s ", fieldsList, strt.query, fieldsList)
+	qry := fmt.Sprintf("SELECT %s, count(*) AS n FROM (%s) GROUP BY %s ", fieldsList, strt.Query, fieldsList)
 
 	if strt.minCount > 0 {
 		qry = fmt.Sprintf("%s HAVING n >= %d", qry, strt.minCount)
@@ -292,7 +292,7 @@ type Generator struct {
 }
 
 // NewGenerator returns a *Generator.
-// query is the CH query to fetch the input data.
+// Query is the CH Query to fetch the input data.
 // sampleTable is the output table of the sampled input data.
 // stratTable is the output table of strats & sampling rates of the input data.
 // targetTotal is the target size of sampleTable
@@ -310,7 +310,7 @@ func NewGenerator(query, sampleTable, stratTable string, targetTotal int, sortBy
 	}
 }
 
-// MakeQuery returns the query used to create sampleTable.
+// MakeQuery returns the Query used to create sampleTable.
 func (gn *Generator) MakeQuery() string {
 	return gn.makeQuery
 }
